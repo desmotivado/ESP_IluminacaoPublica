@@ -1,0 +1,201 @@
+//Código feito por Teodoro Colombo sob licença GPL 3.0
+// Bibliotecas
+#include <analogWrite.h>
+#include "painlessMesh.h"
+#define   MESH_PREFIX     "testemesh"
+#define   MESH_PASSWORD   "senhasenha"
+#define   MESH_PORT       5555
+Scheduler userScheduler;
+painlessMesh  mesh;
+
+//Pinos
+#define LDR A0
+#define LED 23
+#define sensorSom 2
+#define sensorMovimento 15
+
+//Funções
+int     funcLDR();
+int     funcSom();
+int     funcMovimento();
+void    funcLogic();
+void    sendMessage();
+void    funcFlag();
+String  funcLED();
+
+//TaskScheduler declaração
+Task taskfuncLDR          (TASK_SECOND * 2   ,    TASK_FOREVER,   &funcLDR);
+Task taskfuncLED          (TASK_SECOND * 2   ,    TASK_FOREVER,   &funcLED);
+Task taskfuncSom          (TASK_SECOND * 2   ,    TASK_FOREVER,   &funcSom);
+Task taskfuncLogic        (TASK_SECOND * 0.01 ,    TASK_FOREVER,   &funcLogic);
+Task taskSendMessage      (TASK_SECOND * 2   ,    TASK_FOREVER,   &sendMessage);
+Task taskfuncMovimento    (TASK_SECOND * 2   ,    TASK_FOREVER,   &funcMovimento);
+Task taskfuncFlag         (TASK_SECOND * 0.1   ,    TASK_FOREVER,   &funcFlag);
+//Declaração
+int     valLDR;
+int     valSom;
+int     flagSom;
+int     valMovimento;
+int     mapValLDR;
+int     countTimer;
+bool    valLED;
+bool    flagTimer;
+bool    flagMovimento = false;
+bool    flagPrimeiraVez = true;
+String  msgLED;
+
+void funcLogic() {
+
+  valLDR         =      analogRead(LDR);
+  mapValLDR      =      map(valLDR, 0, 400, 0, 255);
+  if (mapValLDR > 255)  mapValLDR = 255;
+
+  valSom         =      digitalRead(sensorSom);
+  valMovimento   =      digitalRead(sensorMovimento);
+
+  if (valMovimento == 1)
+    flagMovimento = true;
+
+  if (valLDR < 200 && flagMovimento == true) {
+    flagTimer = true;
+    //flagMovimento = false;
+  }
+  //Serial.print("valLDR:  ");
+  // Serial.println(mapValLDR);
+  //Serial.print("SensorMovimento: ");
+  Serial.print(flagMovimento);
+  Serial.print(" ");
+  //Serial.print("CountTimer");
+  Serial.println(mapValLDR);
+
+
+}
+
+void  funcFlag() {
+  
+  if(countTimer < 10)
+    flagPrimeiraVez = true;
+
+  if (flagPrimeiraVez == true)
+    flagMovimento = false;
+
+  if(countTimer >= 10 && countTimer < 50)
+  flagPrimeiraVez == false;
+  
+  if (flagTimer == true)
+    countTimer++;
+
+  if (countTimer >= 50) {
+    if (flagMovimento == false)
+      flagTimer = false;
+      countTimer = 0;
+      flagPrimeiraVez = true;
+  }
+
+
+  if (flagTimer == true)
+    analogWrite(LED, valLDR);
+  if (flagTimer == false)
+    analogWrite(LED, 230);
+
+  if (countTimer >= 10)
+    flagPrimeiraVez = false;
+
+}
+
+
+
+
+String funcLED() {
+
+  if (valLED < 100)
+    msgLED  =   ("LED ON");
+  else
+    msgLED  =   ("LED OFF");
+
+
+  return (msgLED);
+}
+
+
+//Funções para printar valores ns String msg
+int funcLDR() {
+  return (valLDR);
+}
+int funcSom() {
+  return (flagSom);
+}
+int funcMovimento() {
+  return (valMovimento);
+}
+
+
+void sendMessage() {
+
+  String msg = "!";
+  msg +=          mesh.getNodeId();
+  msg += "@" +    String(funcLDR());
+  msg += "#" +    String(funcLED());
+  msg += "$" +    String(funcSom());
+  msg += "%" +    String(funcMovimento());
+  mesh.sendBroadcast(msg);
+  taskSendMessage.setInterval(TASK_SECOND * 2);
+
+}
+
+void receivedCallback( uint32_t from, String &msg ) {
+  Serial.printf("Mensagem Recebida de: %u msg=%s\n", from, msg.c_str());
+}
+
+void newConnectionCallback(uint32_t nodeId) {
+  Serial.printf("Nova conexao, nodeId = %u\n", nodeId);
+}
+
+void changedConnectionCallback() {
+  Serial.printf("Conexoes alteradas\n");
+}
+
+void nodeTimeAdjustedCallback(int32_t offset) {
+  Serial.printf("Tempo ajustado %u. Offset = %d\n", mesh.getNodeTime(), offset);
+}
+
+void setup() {
+
+  Serial.begin(115200);
+
+  //pinMode
+  pinMode(LDR,             INPUT);
+  pinMode(sensorSom,       INPUT);
+  pinMode(sensorMovimento, INPUT);
+  pinMode(LED,             OUTPUT);
+
+
+  //Mesh functions
+  mesh.setDebugMsgTypes       ( ERROR | STARTUP );
+  mesh.init                   ( MESH_PREFIX, MESH_PASSWORD, &userScheduler, MESH_PORT );
+  mesh.onReceive              (&receivedCallback);
+  mesh.onNewConnection        (&newConnectionCallback);
+  mesh.onChangedConnections   (&changedConnectionCallback);
+  mesh.onNodeTimeAdjusted     (&nodeTimeAdjustedCallback);
+
+  //TaskScheduler
+  userScheduler.addTask( taskfuncLDR );
+  userScheduler.addTask( taskfuncLED );
+  userScheduler.addTask( taskfuncSom );
+  userScheduler.addTask( taskfuncLogic );
+  userScheduler.addTask( taskSendMessage );
+  userScheduler.addTask( taskfuncMovimento );
+  userScheduler.addTask( taskfuncFlag);
+  taskfuncLDR.enable();
+  taskfuncLED.enable();
+  taskfuncSom.enable();
+  taskfuncLogic.enable();
+  taskSendMessage.enable();
+  taskfuncMovimento.enable();
+  taskfuncFlag.enable();
+}
+
+void loop() {
+  userScheduler.execute();
+  mesh.update();
+}
