@@ -1,0 +1,486 @@
+//Código feito por Teodoro Colombo sob licença GPL 3.0
+
+#include "IPAddress.h"
+#include "painlessMesh.h"
+
+#ifdef ESP8266
+#include "Hash.h"
+#include <ESPAsyncTCP.h>
+#else
+#include <AsyncTCP.h>
+#endif
+#include <ESPAsyncWebServer.h>
+
+#define   MESH_PREFIX     "RedeMesh"
+#define   MESH_PASSWORD   "123456"
+#define   MESH_PORT       5555
+
+#define   STATION_SSID     "LULA LIVRE 2.4"
+#define   STATION_PASSWORD "colombo1310"
+
+#define HOSTNAME "HTTP_BRIDGE"
+
+#define LDR 2
+#define LED 27
+
+
+// Prototype
+void receivedCallback( const uint32_t &from, const String &msg );
+IPAddress getlocalIP();
+Scheduler userScheduler; 
+painlessMesh  mesh;
+AsyncWebServer server(80);
+IPAddress myIP(0,0,0,0);
+IPAddress myAPIP(0,0,0,0);
+
+String msg;
+uint32_t from;
+String funcLDR();
+String funcLED();
+String funcString();
+//Task taskfuncLDR( TASK_SECOND * 3 , TASK_FOREVER, &funcLDR );
+//Task taskfuncLED( TASK_SECOND * 3 , TASK_FOREVER, &funcLED );
+Task taskfuncString( TASK_SECOND * 1, TASK_FOREVER, &funcString );
+
+
+String funcLDR() {
+
+  int valLDR = analogRead(LDR);
+  
+ 
+    return String(valLDR);
+  }
+int valLED = 1;
+String funcLED() {
+   //int valLED = digitalRead(LED);
+  valLED = valLED + 1;
+  
+  /*  
+  if(msg = "liga")
+  digitalWrite(LED,HIGH);
+  if(msg = "desliga")
+  digitalWrite(LED,LOW);
+    */
+
+    
+//    Serial.println(valLED);
+    return String(valLED);
+  
+}
+
+String webValNode1, webValLED1, webValLDR1, webValSOM1, webValMovimento1;
+String webValNode3, webValLED3, webValLDR3, webValSOM3, webValMovimento3;
+
+
+String funcString(){
+
+  int iniVar1 = msg.indexOf("!");
+  int iniVar2 = msg.indexOf("@");
+  int iniVar3 = msg.indexOf("#");
+  int iniVar4 = msg.indexOf("$");
+  int iniVar5 = msg.indexOf("%");
+
+  webValNode1 = msg.substring((iniVar1+1),(iniVar2-1));
+  webValLED1 = msg.substring((iniVar2 + 1), (iniVar3 - 1));
+  webValLDR1 = msg.substring((iniVar3 + 1), (iniVar4 - 1));
+  webValSOM1 = msg.substring((iniVar4 + 1), (iniVar5 - 1));
+  webValMovimento1 = msg.substring((iniVar5 + 1));  
+   //Serial.println(msg);
+return(webValNode1, webValLED1, webValLDR1, webValSOM1, webValMovimento1);
+}
+
+const char index_html[] PROGMEM = R"rawliteral(
+<!DOCTYPE HTML><html>
+<html>
+<head>
+<meta charset="UTF-8">
+<style type="text/css">
+body {
+  background-color: #f6f6ff;
+  font-family: Calibri, Myriad;
+}
+
+#main {
+  width: 780px;
+  padding: 20px;
+  margin: auto;
+}
+
+table.timecard {
+  margin: auto;
+  width: 600px;
+  border-collapse: collapse;
+  border: 1px solid #fff; /*for older IE*/
+  border-style: hidden;
+}
+
+table.timecard caption {
+  background-color: #0074bf;
+  color: #fff;
+  font-size: x-large;
+  font-weight: bold;
+  letter-spacing: .3em;
+}
+
+table.timecard thead th {
+  padding: 8px;
+  background-color: #aaaaaa;
+  font-size: large;
+}
+
+table.timecard thead th#thDay {
+  width: 40%; 
+}
+
+table.timecard thead th#thRegular, table.timecard thead th#thOvertime, table.timecard thead th#thTotal {
+  width: 20%;
+}
+
+table.timecard th, table.timecard td {
+  padding: 3px;
+  border-width: 1px;
+  border-style: solid;
+  border-color: #f2efef #ccc;
+}
+
+table.timecard td {
+  text-align: center;
+}
+
+table.timecard tbody th {
+  text-align: center;
+  font-weight: normal;
+}
+
+table.timecard tfoot {
+  font-weight: bold;
+  font-size: large;
+  background-color: #f2efef;
+  color: #fff;
+}
+
+table.timecard tr.even {
+  background-color: #f2efef;
+}
+</style>
+<title>Iluminação Pública Inteligente</title>
+</head>
+
+<body>
+<div id="main">
+<table class="timecard">
+  <caption>Iluminação Pública Inteligente</caption>
+  <thead>
+    <tr>
+    <th id="thDay">POSTE</th>
+      <th id="thDay">NodeID</th>
+      <th id="thRegular">LDR</th>
+      <th id="thOvertime">LED</th>
+      <th id="thTotal">SOM</th>
+      <th id="thTotal">MOVIMENTO</th>
+      
+    </tr>
+  </thead>
+  <tbody>
+    <tr class="even">
+    <th>2</th>
+      <th>%POSTE2NODEID%</th>
+      <td>%POSTE2LDR%</td>
+      <td>%POSTE2LED%</td>
+      <td>%POSTE2SOM%</td>
+      <td>%POSTE2MOVIMENTO%</td>
+    </tr>
+        </thead>
+  <tbody>
+    <tr class="odd">
+    <th>3</th>
+    
+      <th>%POSTE3NODEID%</th>
+      <td>%POSTE3LDR%</td>
+      <td>%POSTE3LED%</td>
+      <td>%POSTE3SOM%</td>
+      <td>%POSTE3MOVIMENTO%</td>
+    </tr>
+<script>
+
+setInterval(function ( ) {
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      document.getElementById("LDR").innerHTML = this.responseText;
+    }
+  };
+  xhttp.open("GET", "/LDR", true);
+  xhttp.send();
+}, 10000 ) ;
+
+setInterval(function ( ) {
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      document.getElementById("LED").innerHTML = this.responseText;
+    }
+  };
+  xhttp.open("GET", "/LED", true);
+  xhttp.send();
+}, 10000 ) ;
+
+
+setInterval(function ( ) {
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      document.getElementById("POSTE2NODEID").innerHTML = this.responseText;
+    }
+  };
+  xhttp.open("GET", "/POSTE2NODEID", true);
+  xhttp.send();
+}, 10000) ;
+
+setInterval(function ( ) {
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      document.getElementById("POSTE2LDR").innerHTML = this.responseText;
+    }
+  };
+  xhttp.open("GET", "/POSTE2LDR", true);
+  xhttp.send();
+}, 10000) ;
+
+setInterval(function ( ) {
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      document.getElementById("POSTE2LED").innerHTML = this.responseText;
+    }
+  };
+  xhttp.open("GET", "/POSTE2LED", true);
+  xhttp.send();
+}, 10000) ;
+
+setInterval(function ( ) {
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      document.getElementById("POSTE2SOM").innerHTML = this.responseText;
+    }
+  };
+  xhttp.open("GET", "/POSTE2SOM", true);
+  xhttp.send();
+}, 10000) ;
+
+setInterval(function ( ) {
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      document.getElementById("POSTE2MOVIMENTO").innerHTML = this.responseText;
+    }
+  };
+  xhttp.open("GET", "/POSTE2MOVIMENTO", true);
+  xhttp.send();
+}, 10000) ;
+
+setInterval(function ( ) {
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      document.getElementById("POSTE3NODEID").innerHTML = this.responseText;
+    }
+  };
+  xhttp.open("GET", "/POSTE3NODEID", true);
+  xhttp.send();
+}, 10000) ;
+
+setInterval(function ( ) {
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      document.getElementById("POSTE3LDR").innerHTML = this.responseText;
+    }
+  };
+  xhttp.open("GET", "/POSTE3LDR", true);
+  xhttp.send();
+}, 10000) ;
+
+setInterval(function ( ) {
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      document.getElementById("POSTE3LED").innerHTML = this.responseText;
+    }
+  };
+  xhttp.open("GET", "/POSTE3LED", true);
+  xhttp.send();
+}, 10000) ;
+
+setInterval(function ( ) {
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      document.getElementById("POSTE3SOM").innerHTML = this.responseText;
+    }
+  };
+  xhttp.open("GET", "/POSTE3SOM", true);
+  xhttp.send();
+}, 10000) ;
+
+setInterval(function ( ) {
+  var xhttp = new XMLHttpRequest();
+  xhttp.onreadystatechange = function() {
+    if (this.readyState == 4 && this.status == 200) {
+      document.getElementById("POSTE3MOVIMENTO").innerHTML = this.responseText;
+    }
+  };
+  xhttp.open("GET", "/POSTE3MOVIMENTO", true);
+  xhttp.send();
+}, 10000) ;
+
+
+</script>
+</html>)rawliteral";
+
+// Replaces placeholder with DHT values
+String processor(const String& var){
+  //Serial.println(var);
+  if(var == "LDR"){
+    return funcLDR();
+  }
+  else if(var == "LED"){
+    return funcLED();
+  }
+  else if(var == "POSTE2NODEID")
+    return webValNode1;
+    
+  else if(var == "POSTE2LDR")
+    return webValLDR1;
+  
+  else if(var == "POSTE2LED")
+    return webValLED1;
+
+  else if(var == "POSTE2SOM")
+    return webValSOM1;
+
+  else if(var == "POSTE2MOVIMENTO")
+    return webValMovimento1;
+
+  else if(var == "POSTE3NODEID")
+    return webValNode3;
+    
+  else if(var == "POSTE3LDR")
+    return webValLDR3;
+  
+  else if(var == "POSTE3LED")
+    return webValLED3;
+
+  else if(var == "POSTE3SOM")
+    return webValSOM3;
+
+  else if(var == "POSTE3MOVIMENTO")
+    return webValMovimento3; 
+  return String();
+}
+
+void receivedCallback( const uint32_t &from, const String &msg ) {
+  Serial.printf("bridge: Received from %u msg=%s\n", from, msg.c_str());  
+  int iniVar1 = msg.indexOf("!");
+  int iniVar2 = msg.indexOf("@");
+  int iniVar3 = msg.indexOf("#");
+  int iniVar4 = msg.indexOf("$");
+  int iniVar5 = msg.indexOf("%");
+  if(from == 856525670){
+  webValNode1 = msg.substring((iniVar1+1),(iniVar2));
+  webValLDR1 = msg.substring((iniVar2+1), (iniVar3));
+  webValLED1 = msg.substring((iniVar3+1), (iniVar4));
+  webValSOM1 = msg.substring((iniVar4+1), (iniVar5));
+  webValMovimento1 = msg.substring((iniVar5+1));
+  }  
+  if(from == 111111111){
+  webValNode3 = msg.substring((iniVar1+1),(iniVar2));
+  webValLDR3 = msg.substring((iniVar2+1), (iniVar3));
+  webValLED3 = msg.substring((iniVar3+1), (iniVar4));
+  webValSOM3 = msg.substring((iniVar4+1), (iniVar5));
+  webValMovimento3 = msg.substring((iniVar5+1));
+  }  
+//  Serial.printf("Valor: webValLED1=%s\n",webValLED1.c_str() );
+ Serial.println(from);
+ 
+}
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(LDR, INPUT);
+  pinMode(LED, OUTPUT);
+  digitalWrite(LED, HIGH);
+  mesh.setDebugMsgTypes( ERROR | STARTUP | CONNECTION );  // set before init() so that you can see startup messages
+
+  // Channel set to 6. Make sure to use the same channel for your mesh and for you other
+  // network (STATION_SSID)
+  mesh.init( MESH_PREFIX, MESH_PASSWORD, MESH_PORT, WIFI_AP_STA, 6 );
+ mesh.onReceive(&receivedCallback);
+
+  mesh.stationManual(STATION_SSID, STATION_PASSWORD);
+  mesh.setHostname(HOSTNAME);
+
+  // Bridge node, should (in most cases) be a root node. See [the wiki](https://gitlab.com/painlessMesh/painlessMesh/wikis/Possible-challenges-in-mesh-formation) for some background
+  mesh.setRoot(true);
+  // This node and all other nodes should ideally know the mesh contains a root, so call this on all nodes
+  mesh.setContainsRoot(true);
+
+  myAPIP = IPAddress(mesh.getAPIP());
+  Serial.println("My AP IP is " + myAPIP.toString());
+
+  //Async webserver
+  
+  // Route for root / web page
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/html", index_html, processor);
+  });
+  server.on("/LDR", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain", funcLDR().c_str());
+  });
+  server.on("/LED", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain", funcLED().c_str());
+  });
+
+    server.on("/POSTE2NODEID", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain",  webValNode1.c_str());
+  });
+    server.on("/POSTE2LDR", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain",  webValLDR1.c_str());
+  });
+    server.on("/POSTE2LED", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain",  webValLED1.c_str());
+  });
+    server.on("/POSTE2SOM", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain",  webValSOM1.c_str());
+  });
+    server.on("/POSTE2Movimento", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send_P(200, "text/plain",  webValMovimento1.c_str());
+  });
+
+server.begin();
+
+  //userScheduler.addTask( taskfuncLDR );
+  //userScheduler.addTask( taskfuncLED );
+  userScheduler.addTask( taskfuncString );
+ // taskfuncLDR.enable();
+ // taskfuncLED.enable();
+ //taskfuncString.enable();
+ 
+}
+
+void loop() {
+  mesh.update();
+  userScheduler.execute();
+  if(myIP != getlocalIP()){
+    myIP = getlocalIP();
+    Serial.println("My IP is " + myIP.toString());
+  }
+}
+
+
+
+IPAddress getlocalIP() {
+  return IPAddress(mesh.getStationIP());
+}
